@@ -1,0 +1,24 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /complaints",
+  "rawPath": "/dev/complaints",
+  "headers": { "content-type": "application/json" },
+  "requestContext": {
+    "requestId": "local-test-1",
+    "http": { "method": "POST", "path": "/dev/complaints" },
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "11111111-2222-4333-8444-555555555555",
+          "email": "student@example.edu",
+          "name": "Test Student",
+          "token_use": "id",
+          "cognito:groups": "[Students]"
+        },
+        "scopes": null
+      }
+    }
+  },
+  "body": "{\"title\":\"Hostel Wi-Fi not working\",\"description\":\"Wi-Fi in Block B has been down since 8 AM.\",\"category\":\"WIFI\",\"location\":\"Hostel Block B, 2nd floor\"}",
+  "isBase64Encoded": false
+}

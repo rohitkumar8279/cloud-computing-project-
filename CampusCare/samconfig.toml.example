@@ -1,0 +1,40 @@
+# Copy to samconfig.toml (git-ignored) and edit the values marked <-- CHANGE.
+#   Windows:  Copy-Item samconfig.toml.example samconfig.toml
+#   macOS/Linux: cp samconfig.toml.example samconfig.toml
+#
+# No credentials belong in this file. It only names an AWS CLI *profile*
+# configured with `aws configure --profile campuscare`.
+
+version = 0.1
+
+[default.global.parameters]
+stack_name = "campuscare-dev"
+region = "ap-south-1"
+profile = "campuscare"                 # <-- CHANGE if you use another profile name
+
+[default.validate.parameters]
+lint = true
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true               # SAM shows the change set and asks before creating anything
+fail_on_empty_changeset = false
+resolve_s3 = true                      # SAM-managed artifact bucket (tiny, a few MB)
+s3_prefix = "campuscare-dev"
+parameter_overrides = [
+  "StageName=dev",
+  "AdminNotificationEmail=admin@example.edu",   # <-- CHANGE to your admin email (or empty)
+  "AllowedOrigins=*",                           # <-- after Amplify deploy: http://localhost:5173,https://main.dXXXX.amplifyapp.com
+  "LogRetentionDays=14",
+  "DynamoDBBillingMode=PROVISIONED",
+  "MaxUploadBytes=2097152",
+  "ApiThrottleRateLimit=10",
+  "ApiThrottleBurstLimit=20",
+]
+
+[default.delete.parameters]
+no_prompts = false

@@ -1,0 +1,21 @@
+# AWS Amplify Hosting build spec (monorepo: the React app lives in /frontend).
+# Environment variables (VITE_*) are set in the Amplify console, not in git.
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - node -v
+            - if [ -f package-lock.json ]; then npm ci; else npm install; fi
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*

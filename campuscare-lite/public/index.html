@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusCare Lite</title>
+<style>
+  :root {
+    --bg: #f4f6fb; --card: #fff; --text: #172033; --muted: #5b6579; --line: #e4e8f1;
+    --brand: #1f4fe0; --brand-d: #1a3fb8; --nav1: #10234f; --nav2: #17357a;
+    --ok: #12805c; --okbg: #e3f6ee; --warn: #b45f06; --warnbg: #fff0d9; --err: #b42318; --errbg: #fdeceb;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+  button { font: inherit; cursor: pointer; }
+  svg { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- layout ---------- */
+  .app { display: grid; grid-template-columns: 272px 1fr; min-height: 100vh; }
+  aside { background: linear-gradient(180deg, var(--nav1), var(--nav2)); color: #dfe7fb; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .brand { display: flex; gap: 12px; align-items: center; padding: 22px 20px 18px; }
+  .brand .logo { width: 44px; height: 44px; border-radius: 12px; background: rgba(255,255,255,.14); display: grid; place-items: center; color: #fff; }
+  .brand .logo svg { width: 26px; height: 26px; }
+  .brand b { display: block; color: #fff; font-size: 1.1rem; line-height: 1.2; }
+  .brand span { font-size: .85rem; opacity: .8; }
+  nav { padding: 8px 14px; flex: 1; }
+  nav a, nav .navbtn { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 14px; border-radius: 10px; color: #dfe7fb; text-decoration: none; background: none; border: 0; font-size: .95rem; font-weight: 600; text-align: left; margin-bottom: 4px; }
+  nav a:hover, nav .navbtn:hover { background: rgba(255,255,255,.08); }
+  nav a.active { background: var(--brand); color: #fff; }
+  nav .chev { margin-left: auto; transition: transform .2s; width: 16px; height: 16px; }
+  nav .navbtn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+  .submenu { display: none; margin: 0 0 4px 34px; }
+  .submenu.open { display: block; }
+  .submenu a { font-weight: 500; padding: 9px 12px; font-size: .9rem; }
+  .campus { height: 120px; opacity: .35; margin-top: auto; background: linear-gradient(transparent, rgba(255,255,255,.12)); }
+
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .topbar h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
+  .topbar p { margin: 0; color: var(--muted); font-size: .9rem; }
+  .topbar .grow { flex: 1; min-width: 0; }
+  .menu-toggle { display: none; background: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px; color: var(--text); }
+  .iconbtn { position: relative; background: none; border: 0; padding: 8px; color: var(--text); border-radius: 50%; }
+  .iconbtn:hover { background: var(--bg); }
+  .dot { position: absolute; top: 6px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: #e5362b; border: 2px solid #fff; display: none; }
+  .profile { position: relative; }
+  .profile > button { display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 4px 6px; border-radius: 999px; color: var(--text); font-weight: 600; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 700; }
+  .pmenu { display: none; position: absolute; right: 0; top: 52px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(20,30,60,.14); padding: 8px; min-width: 210px; }
+  .pmenu.open { display: block; }
+  .pmenu small { display: block; padding: 6px 10px; color: var(--muted); }
+  .pmenu button { width: 100%; text-align: left; background: none; border: 0; padding: 9px 10px; border-radius: 8px; color: var(--text); }
+  .pmenu button:hover { background: var(--bg); }
+
+  main { padding: 22px 24px 40px; width: 100%; max-width: 1600px; }
+  .app > div { min-width: 0; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ---------- hero + stats ---------- */
+  .hero { border-radius: var(--radius); padding: 28px 30px; color: #fff; background: radial-gradient(1200px 300px at 90% 120%, rgba(120,170,255,.45), transparent 60%), linear-gradient(110deg, #0d2a7a, #1b47d4); margin-bottom: 18px; }
+  .hero h2 { margin: 0 0 6px; font-size: 1.8rem; line-height: 1.2; }
+  .hero p { margin: 0 0 18px; font-size: 1.05rem; opacity: .95; }
+  .chips { display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.16); padding: 8px 16px; border-radius: 999px; font-weight: 600; font-size: .92rem; }
+  .chip svg { width: 18px; height: 18px; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+  .stat { display: flex; align-items: center; gap: 14px; border-radius: var(--radius); padding: 16px 18px; border: 1px solid var(--line); }
+  .stat .ic { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .stat .ic svg { width: 26px; height: 26px; }
+  .stat b { display: block; font-size: 1.8rem; line-height: 1.1; }
+  .stat span { color: var(--muted); font-weight: 500; }
+  .s-total { background: #eaf0ff; } .s-total .ic { background: #d5e2ff; color: #1f4fe0; }
+  .s-open { background: #fff4e3; } .s-open .ic { background: #ffe5bd; color: #d97706; }
+  .s-res { background: #e8f8f0; } .s-res .ic { background: #c9f0dd; color: #12805c; }
+  .s-rate { background: #f1ebff; } .s-rate .ic { background: #e0d3ff; color: #7c3aed; }
+
+  /* ---------- cards / forms ---------- */
+  .grid2 { display: grid; grid-template-columns: 1.55fr 1fr; gap: 18px; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+  .card-h { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .card-h .ic { width: 42px; height: 42px; border-radius: 12px; background: #eaf0ff; color: var(--brand); display: grid; place-items: center; }
+  .card-h h3 { margin: 0; font-size: 1.15rem; line-height: 1.2; }
+  .card-h p { margin: 0; color: var(--muted); font-size: .9rem; }
+  .card-h .right { margin-left: auto; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; font-size: .9rem; }
+  label i { color: #e5362b; font-style: normal; }
+  .opt { font-weight: 500; color: var(--muted); }
+  input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--text); font: inherit; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #9db6ff; border-color: var(--brand); }
+  textarea { min-height: 96px; resize: vertical; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .counter { text-align: right; font-size: .8rem; color: var(--muted); margin-top: 2px; }
+  .evidence { display: flex; align-items: center; gap: 12px; background: var(--bg); border-radius: 12px; padding: 12px 14px; margin-top: 14px; }
+  .evidence .txt { flex: 1; min-width: 0; }
+  .evidence b { display: block; font-size: .92rem; }
+  .evidence small { color: var(--muted); overflow-wrap: anywhere; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; border-radius: 10px; padding: 10px 18px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--text); }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.primary:hover { background: var(--brand-d); }
+  .btn.primary:disabled { opacity: .6; cursor: wait; }
+  .btn.sm { padding: 5px 12px; font-size: .85rem; }
+  .actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: .92rem; display: none; }
+  .msg.ok { display: block; background: var(--okbg); color: var(--ok); }
+  .msg.err { display: block; background: var(--errbg); color: var(--err); }
+
+  /* ---------- lists ---------- */
+  .empty { text-align: center; padding: 26px 10px; color: var(--muted); }
+  .empty .big { width: 84px; height: 84px; margin: 0 auto 10px; border-radius: 20px; background: #eaf0ff; color: var(--brand); display: grid; place-items: center; }
+  .empty .big svg { width: 42px; height: 42px; }
+  .empty h4 { margin: 0 0 4px; color: var(--text); font-size: 1.1rem; }
+  .item { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; background: #fff; }
+  .item h4 { margin: 0 0 4px; font-size: 1rem; overflow-wrap: anywhere; }
+  .item p { margin: 4px 0 8px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .meta { font-size: .82rem; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .badge { padding: 2px 10px; border-radius: 999px; font-size: .78rem; font-weight: 700; text-transform: capitalize; }
+  .badge.open { background: var(--warnbg); color: var(--warn); }
+  .badge.resolved { background: var(--okbg); color: var(--ok); }
+  .meta a { color: var(--brand); font-weight: 600; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .toolbar input { flex: 2; min-width: 180px; } .toolbar select { flex: 1; min-width: 130px; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .barrow { display: grid; grid-template-columns: 96px 1fr 32px; gap: 10px; align-items: center; margin: 8px 0; font-size: .92rem; }
+  .bar { height: 12px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+  ol.how li { margin-bottom: 10px; }
+  code { background: var(--bg); padding: 1px 6px; border-radius: 4px; font-size: .9em; }
+  .keybox { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 14px; }
+  .keybox > div { flex: 1; min-width: 220px; }
+  .keybox label { margin-top: 0; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 1100px) { .stats { grid-template-columns: repeat(2, 1fr); } .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    aside { position: fixed; inset: 0 auto 0 0; width: 272px; z-index: 20; transform: translateX(-100%); transition: transform .2s; }
+    aside.open { transform: none; box-shadow: 0 0 0 100vmax rgba(10,18,40,.5); }
+    .menu-toggle { display: block; }
+    .topbar { padding: 12px 14px; } main { padding: 16px 14px 40px; }
+    .topbar p, .profile .pname { display: none; }
+    .hero h2 { font-size: 1.4rem; }
+  }
+  @media (max-width: 520px) { .stats, .row2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V10m14 11V10M9 21v-6h6v6M2 10l10-6 10 6z"/></svg></div>
+      <div><b>CampusCare Lite</b><span>Complaint Management</span></div>
+    </div>
+    <nav id="nav">
+      <a href="#dashboard" data-view="dashboard"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Dashboard</a>
+      <a href="#submit" data-view="submit"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Submit Complaint</a>
+      <a href="#my" data-view="my"><svg viewBox="0 0 24 24"><path d="M9 4h6a2 2 0 012 2v14H7V6a2 2 0 012-2zM9 10h6M9 14h6"/></svg>My Complaints</a>
+      <a href="#all" data-view="all"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>All Complaints</a>
+      <button class="navbtn" id="admin-toggle" aria-expanded="false" aria-controls="admin-sub"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Admin Panel<svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="submenu" id="admin-sub">
+        <a href="#admin" data-view="admin">Manage complaints</a>
+        <a href="#admin-run" data-view="admin">Run report job</a>
+      </div>
+      <a href="#reports" data-view="reports"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Reports</a>
+      <a href="#how" data-view="how"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>How it Works</a>
+    </nav>
+    <div class="campus" aria-hidden="true"></div>
+  </aside>
+
+  <div>
+    <header class="topbar">
+      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div class="grow">
+        <h1>CampusCare Lite</h1>
+        <p>A serverless campus complaint system &ndash; Cloudflare Workers + D1 + Cron</p>
+      </div>
+      <button class="iconbtn" id="bell" aria-label="Notifications" title="Resolved complaints">
+        <svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1112 0c0 6 2 7 2 7H4s2-1 2-7zM10 20a2 2 0 004 0"/></svg><span class="dot" id="bell-dot"></span>
+      </button>
+      <div class="profile">
+        <button id="profile-btn" aria-haspopup="true" aria-expanded="false"><span class="avatar" id="avatar">RK</span><span class="pname" id="pname">Rohit Kumar</span><svg viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M6 9l6 6 6-6"/></svg></button>
+        <div class="pmenu" id="pmenu">
+          <small>Signed in as a demo user. Your name is saved in this browser only.</small>
+          <button id="change-name">Change my name</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- Dashboard (also hosts the submit form) -->
+      <div class="view active" id="view-dashboard">
+        <section class="hero">
+          <h2>Raise, Track, and Resolve Campus Issues</h2>
+          <p>Report hostel, mess, network, and campus facility issues in a few clicks.</p>
+          <div class="chips">
+            <span class="chip"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Fast &amp; Simple</span>
+            <span class="chip"><svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1A4.5 4.5 0 0117 18z"/></svg>Serverless</span>
+            <span class="chip"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Reliable &amp; Secure</span>
+          </div>
+        </section>
+
+        <div class="stats" aria-live="polite">
+          <div class="stat s-total"><div class="ic"><svg viewBox="0 0 24 24"><path d="M9 4h6a2 2 0 012 2v14H7V6a2 2 0 012-2zM9 10h6M9 14h6"/></svg></div><div><b id="s-total">0</b><span>Total Complaints</span></div></div>
+          <div class="stat s-open"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div><b id="s-open">0</b><span>Open</span></div></div>
+          <div class="stat s-res"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></div><div><b id="s-resolved">0</b><span>Resolved</span></div></div>
+          <div class="stat s-rate"><div class="ic"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg></div><div><b id="s-rate">0%</b><span>Resolution Rate</span></div></div>
+        </div>
+
+        <div class="grid2">
+          <section class="card" id="form-card">
+            <div class="card-h">
+              <div class="ic"><svg viewBox="0 0 24 24"><path d="M9 4h6a2 2 0 012 2v14H7V6a2 2 0 012-2zM12 10v6M9 13h6"/></svg></div>
+              <div><h3>Submit a Complaint</h3><p>Report an issue and our team will look into it.</p></div>
+            </div>
+            <form id="form" novalidate>
+              <label for="title">Title <i>*</i></label>
+              <input id="title" maxlength="100" placeholder="e.g. Water cooler not working in BH2">
+              <div class="row2">
+                <div>
+                  <label for="category">Category <i>*</i></label>
+                  <select id="category"><option>Hostel</option><option>Mess</option><option>Network</option><option>Academics</option><option>Library</option><option>Transport</option><option>Other</option></select>
+                </div>
+                <div>
+                  <label for="location">Location <span class="opt">(Optional)</span></label>
+                  <input id="location" maxlength="100" placeholder="e.g. BH2, Floor 3, Room 101">
+                </div>
+              </div>
+              <label for="description">Description <i>*</i></label>
+              <textarea id="description" maxlength="500" placeholder="Describe the issue in detail (what, where, since when, etc.)"></textarea>
+              <div class="counter"><span id="count">0</span> / 500</div>
+              <div class="evidence">
+                <svg viewBox="0 0 24 24"><path d="M20 11l-8 8a5 5 0 01-7-7l9-9a3.5 3.5 0 015 5l-9 9a2 2 0 01-3-3l8-8"/></svg>
+                <div class="txt"><b>Attach Evidence <span class="opt">(Optional)</span></b><small id="file-hint">Add an image (JPG, PNG) or a document (PDF), up to 250 KB</small></div>
+                <input type="file" id="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" hidden>
+                <button type="button" class="btn sm" id="file-btn">Choose File</button>
+              </div>
+              <div class="msg" id="form-msg" role="status"></div>
+              <div class="actions">
+                <button type="button" class="btn" id="clear">Clear</button>
+                <button type="submit" class="btn primary" id="submit-btn">Submit Complaint</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card">
+            <div class="card-h">
+              <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+              <h3>Recent Complaints</h3>
+              <a class="btn sm right" href="#my">View All &rarr;</a>
+            </div>
+            <div id="recent"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="view" id="view-my">
+        <section class="card"><div class="card-h"><h3>My Complaints</h3></div><div id="my-list"></div></section>
+      </div>
+
+      <div class="view" id="view-all">
+        <section class="card">
+          <div class="card-h"><h3>All Complaints</h3></div>
+          <div class="toolbar">
+            <input id="search" type="search" placeholder="Search title, location or description" aria-label="Search complaints">
+            <select id="f-status" aria-label="Filter by status"><option value="">All statuses</option><option value="open">Open</option><option value="resolved">Resolved</option></select>
+            <select id="f-cat" aria-label="Filter by category"><option value="">All categories</option></select>
+          </div>
+          <div id="all-list"></div>
+        </section>
+      </div>
+
+      <div class="view" id="view-admin">
+        <section class="card">
+          <div class="card-h"><h3>Admin Panel</h3></div>
+          <div class="keybox">
+            <div><label for="adminkey">Admin key</label><input id="adminkey" type="password" autocomplete="off" placeholder="Enter admin key"></div>
+          </div>
+          <div class="msg" id="admin-msg" role="status"></div>
+          <div id="admin-list"></div>
+          <div id="admin-run" style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line)">
+            <b>Report job</b>
+            <p class="opt" style="margin:4px 0 12px">Runs the same function the daily cron runs and saves a row in Reports.</p>
+            <button class="btn primary" id="run-report" type="button">Run report now</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="view" id="view-reports">
+        <div class="grid2">
+          <section class="card">
+            <div class="card-h"><h3>Reports written by the scheduled job</h3></div>
+            <p class="opt" style="margin-top:0">The cron trigger runs once a day and saves one row here. &ldquo;manual&rdquo; rows come from the admin button.</p>
+            <div id="report-table"></div>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>Complaints by category</h3></div>
+            <div id="cat-bars"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="view" id="view-how">
+        <section class="card">
+          <div class="card-h"><h3>How it works</h3></div>
+          <ol class="how">
+            <li>This page is a static file served by Cloudflare. There is no web server to run.</li>
+            <li>When you submit the form, the browser calls <code>POST /api/complaints</code>. A Worker (a serverless function) validates the data and saves it to <b>D1</b>, a serverless database.</li>
+            <li>Admin actions send an <code>x-admin-key</code> header, and the Worker checks it before changing any data.</li>
+            <li>A <b>cron trigger</b> wakes the Worker every day at 8:00 AM IST, counts the complaints and stores a report row.</li>
+            <li>Nothing runs between requests, so nothing is used while idle.</li>
+          </ol>
+          <p><b>AWS equivalent:</b> Worker = Lambda &middot; API route = API Gateway &middot; D1 = DynamoDB &middot; Cron trigger = EventBridge schedule.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const CATS = ["Hostel", "Mess", "Network", "Academics", "Library", "Transport", "Other"];
+const MAX_BYTES = 250 * 1024;
+
+// ---- safe storage (works even if the browser blocks it) ----
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+let clientId = store.get("cc_client_id");
+if (!clientId) {
+  clientId = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/-/g, "");
+  store.set("cc_client_id", clientId);
+}
+let userName = store.get("cc_name") || "Rohit Kumar";
+
+// ---- DOM helpers: user text only ever goes through textContent ----
+function el(tag, props = {}, children = []) {
+  const n = document.createElement(tag);
+  Object.assign(n, props);
+  for (const c of [].concat(children)) if (c != null) n.append(c);
+  return n;
+}
+const icon = (d) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 24 24"); const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); p.setAttribute("d", d); s.append(p); return s; };
+const fmt = (s) => (s ? s.replace("T", " ").slice(0, 16) + " UTC" : "");
+
+async function api(path, options = {}) {
+  const res = await fetch(path, options);
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+  return data;
+}
+
+function setMsg(id, text, ok) {
+  const m = $(id);
+  m.textContent = text;
+  m.className = "msg " + (ok ? "ok" : "err");
+}
+
+// ---- profile ----
+function renderProfile() {
+  $("pname").textContent = userName;
+  $("avatar").textContent = userName.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "U";
+}
+$("profile-btn").onclick = () => {
+  const open = $("pmenu").classList.toggle("open");
+  $("profile-btn").setAttribute("aria-expanded", String(open));
+};
+$("change-name").onclick = () => {
+  const n = prompt("Your name", userName);
+  if (n && n.trim()) { userName = n.trim().slice(0, 60); store.set("cc_name", userName); renderProfile(); }
+  $("pmenu").classList.remove("open");
+};
+document.addEventListener("click", (e) => { if (!e.target.closest(".profile")) $("pmenu").classList.remove("open"); });
+
+// ---- complaint card ----
+function complaintItem(c, adminActions) {
+  const meta = el("div", { className: "meta" }, [
+    el("span", { className: "badge " + c.status, textContent: c.status }),
+    el("span", { textContent: c.category }),
+    c.location ? el("span", { textContent: "📍 " + c.location }) : null,
+    el("span", { textContent: "#" + c.id + " · " + c.submitted_by + " · " + fmt(c.created_at) }),
+  ]);
+  if (c.has_attachment) meta.append(el("a", { href: "/api/complaints/" + c.id + "/attachment", target: "_blank", rel: "noopener", textContent: "View attachment" }));
+  const item = el("div", { className: "item" }, [el("h4", { textContent: c.title }), el("p", { textContent: c.description }), meta]);
+  if (adminActions) {
+    const next = c.status === "open" ? "resolved" : "open";
+    const btn = el("button", { className: "btn sm", textContent: next === "resolved" ? "Mark resolved" : "Reopen" });
+    btn.onclick = async () => {
+      try {
+        await api("/api/complaints/" + c.id, { method: "PATCH", headers: { "content-type": "application/json", "x-admin-key": $("adminkey").value }, body: JSON.stringify({ status: next }) });
+        setMsg("admin-msg", "Updated complaint #" + c.id, true);
+        refreshAll();
+      } catch (e) { setMsg("admin-msg", e.message, false); }
+    };
+    meta.append(btn);
+  }
+  return item;
+}
+
+function emptyState(title, text, withButton) {
+  const box = el("div", { className: "empty" }, [
+    el("div", { className: "big" }, [icon("M9 4h6a2 2 0 012 2v14H7V6a2 2 0 012-2zM9 10h6M9 14h6")]),
+    el("h4", { textContent: title }),
+    el("div", { textContent: text }),
+  ]);
+  if (withButton) box.append(el("div", { style: "margin-top:14px" }, [el("a", { className: "btn primary", href: "#submit", textContent: "+ Submit Complaint" })]));
+  return box;
+}
+
+function fill(boxId, list, opts) {
+  const box = $(boxId);
+  box.replaceChildren();
+  if (!list.length) { box.append(opts.empty); return; }
+  list.forEach((c) => box.append(complaintItem(c, opts.admin)));
+}
+
+// ---- data loading ----
+let allComplaints = [], myComplaints = [];
+
+async function loadStats() {
+  const s = await api("/api/stats");
+  $("s-total").textContent = s.total;
+  $("s-open").textContent = s.open;
+  $("s-resolved").textContent = s.resolved;
+  $("s-rate").textContent = s.rate + "%";
+  const bars = $("cat-bars");
+  bars.replaceChildren();
+  if (!s.by_category.length) bars.append(el("p", { className: "opt", textContent: "No data yet." }));
+  const max = Math.max(1, ...s.by_category.map((r) => r.n));
+  s.by_category.forEach((r) => {
+    const fillBar = el("i"); fillBar.style.width = Math.round((r.n / max) * 100) + "%";
+    bars.append(el("div", { className: "barrow" }, [el("span", { textContent: r.category }), el("div", { className: "bar" }, [fillBar]), el("b", { textContent: String(r.n) })]));
+  });
+}
+
+function renderAll() {
+  const q = $("search").value.trim().toLowerCase(), st = $("f-status").value, cat = $("f-cat").value;
+  const filtered = allComplaints.filter((c) =>
+    (!st || c.status === st) && (!cat || c.category === cat) &&
+    (!q || (c.title + " " + c.location + " " + c.description).toLowerCase().includes(q)));
+  fill("all-list", filtered, { empty: emptyState("No complaints found", "Try a different filter, or submit the first one.", true) });
+}
+
+async function loadComplaints() {
+  [allComplaints, myComplaints] = (await Promise.all([
+    api("/api/complaints"),
+    api("/api/complaints?client_id=" + encodeURIComponent(clientId)),
+  ])).map((r) => r.complaints);
+  fill("recent", myComplaints.slice(0, 4), { empty: emptyState("No complaints yet", "You haven't raised any complaints. Submit one to get started!", true) });
+  fill("my-list", myComplaints, { empty: emptyState("No complaints yet", "You haven't raised any complaints. Submit one to get started!", true) });
+  fill("admin-list", allComplaints, { empty: el("p", { className: "opt", textContent: "No complaints yet." }), admin: true });
+  renderAll();
+  updateBell();
+}
+
+async function loadReports() {
+  const { reports } = await api("/api/reports");
+  const box = $("report-table");
+  box.replaceChildren();
+  if (!reports.length) { box.append(el("p", { className: "opt", textContent: "No reports yet. Wait for the cron, or run one from the Admin Panel." })); return; }
+  const head = el("tr", {}, ["Time", "Triggered by", "Open", "Resolved", "Total"].map((h) => el("th", { textContent: h })));
+  const table = el("table", {}, [head]);
+  reports.forEach((r) => table.append(el("tr", {}, [fmt(r.run_at), r.trigger_type, r.open_count, r.resolved_count, r.total_count].map((v) => el("td", { textContent: String(v) })))));
+  box.append(table);
+}
+
+async function refreshAll() {
+  try { await Promise.all([loadStats(), loadComplaints(), loadReports()]); }
+  catch (e) { setMsg("form-msg", "Could not load data: " + e.message, false); }
+}
+
+// ---- notification bell: my complaints resolved since I last looked ----
+function seenSet() { try { return new Set(JSON.parse(store.get("cc_seen") || "[]")); } catch { return new Set(); } }
+function unseenResolved() { const seen = seenSet(); return myComplaints.filter((c) => c.status === "resolved" && !seen.has(c.id)); }
+function updateBell() { $("bell-dot").style.display = unseenResolved().length ? "block" : "none"; }
+$("bell").onclick = () => {
+  const n = unseenResolved().length;
+  store.set("cc_seen", JSON.stringify(myComplaints.filter((c) => c.status === "resolved").map((c) => c.id)));
+  updateBell();
+  location.hash = "#my";
+  if (n) alert(n + " of your complaints " + (n === 1 ? "has" : "have") + " been resolved.");
+};
+
+// ---- file picker (images are shrunk in the browser to fit the 250 KB limit) ----
+let attachment = null;
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = () => reject(new Error("Could not read the file"));
+    r.readAsDataURL(blob);
+  });
+}
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file);
+  for (const [maxSide, q] of [[1280, 0.75], [1024, 0.6], [800, 0.5], [640, 0.4]]) {
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", q));
+    if (blob && blob.size <= MAX_BYTES) return blob;
+  }
+  throw new Error("Image is too large even after compressing. Please pick a smaller one.");
+}
+function resetFile() { attachment = null; $("file").value = ""; $("file-hint").textContent = "Add an image (JPG, PNG) or a document (PDF), up to 250 KB"; }
+
+$("file-btn").onclick = () => $("file").click();
+$("file").onchange = async () => {
+  const f = $("file").files[0];
+  if (!f) return resetFile();
+  try {
+    let blob = f, name = f.name;
+    if (f.type === "image/jpeg" || f.type === "image/png") { blob = await shrinkImage(f); name = f.name.replace(/\.\w+$/, "") + ".jpg"; }
+    else if (f.type === "application/pdf") { if (f.size > MAX_BYTES) throw new Error("PDF is larger than 250 KB."); }
+    else throw new Error("Only JPG, PNG or PDF files are allowed.");
+    attachment = { name, data: await blobToBase64(blob) };
+    $("file-hint").textContent = "Attached: " + name + " (" + Math.ceil(blob.size / 1024) + " KB)";
+    $("form-msg").className = "msg";
+  } catch (e) { resetFile(); setMsg("form-msg", e.message, false); }
+};
+
+// ---- form ----
+$("description").addEventListener("input", () => { $("count").textContent = $("description").value.length; });
+function clearForm() { $("form").reset(); $("count").textContent = "0"; resetFile(); }
+$("clear").onclick = () => { clearForm(); $("form-msg").className = "msg"; };
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = $("title").value.trim(), description = $("description").value.trim();
+  if (!title) return setMsg("form-msg", "Please enter a title.", false);
+  if (!description) return setMsg("form-msg", "Please describe the issue.", false);
+  $("submit-btn").disabled = true;
+  try {
+    const out = await api("/api/complaints", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, category: $("category").value, location: $("location").value, description, submitted_by: userName, client_id: clientId, attachment }),
+    });
+    setMsg("form-msg", "Submitted! Your complaint number is #" + out.id, true);
+    clearForm();
+    refreshAll();
+  } catch (err) { setMsg("form-msg", err.message, false); }
+  finally { $("submit-btn").disabled = false; }
+});
+
+// ---- admin ----
+$("run-report").onclick = async () => {
+  try {
+    await api("/api/run-report", { method: "POST", headers: { "x-admin-key": $("adminkey").value } });
+    setMsg("admin-msg", "Report generated. Open the Reports page to see it.", true);
+    loadReports();
+  } catch (e) { setMsg("admin-msg", e.message, false); }
+};
+$("admin-toggle").onclick = () => {
+  const open = $("admin-sub").classList.toggle("open");
+  $("admin-toggle").setAttribute("aria-expanded", String(open));
+};
+
+// ---- filters ----
+CATS.forEach((c) => $("f-cat").append(el("option", { value: c, textContent: c })));
+["search", "f-status", "f-cat"].forEach((id) => $(id).addEventListener("input", renderAll));
+
+// ---- routing ----
+function route() {
+  const hash = (location.hash || "#dashboard").slice(1);
+  const view = hash === "submit" ? "dashboard" : hash === "admin-run" ? "admin" : hash;
+  const target = document.getElementById("view-" + view) ? view : "dashboard";
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + target));
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + hash));
+  if (target === "admin") { $("admin-sub").classList.add("open"); $("admin-toggle").setAttribute("aria-expanded", "true"); }
+  $("sidebar").classList.remove("open");
+  if (hash === "submit") { $("form-card").scrollIntoView(); $("title").focus({ preventScroll: true }); }
+  else if (hash === "admin-run") $("admin-run").scrollIntoView();
+  else window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+$("menu-toggle").onclick = () => $("sidebar").classList.toggle("open");
+
+renderProfile();
+route();
+refreshAll();
+</script>
+</body>
+</html>

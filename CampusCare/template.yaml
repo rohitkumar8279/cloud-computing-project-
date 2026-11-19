@@ -1,0 +1,556 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CampusCare - Serverless Campus Complaint Management System.
+  Cognito + API Gateway (HTTP API, JWT authorizer) + Lambda (Node.js 22) +
+  DynamoDB + private S3 + SNS + CloudWatch. Cost-conscious defaults.
+
+# ---------------------------------------------------------------------------
+# Parameters - nothing account-specific or secret is hardcoded.
+# ---------------------------------------------------------------------------
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+    AllowedPattern: "^[a-z0-9-]{2,12}$"
+    Description: Deployment stage (used in resource names and the API stage).
+
+  AdminNotificationEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email subscribed to the SNS notification topic. Leave empty to skip the
+      subscription. AWS sends a confirmation email that must be accepted.
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "*"
+    Description: >
+      Comma-separated browser origins allowed by API Gateway CORS and S3 CORS,
+      e.g. "http://localhost:5173,https://main.d123abc.amplifyapp.com".
+      Use "*" only while developing.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30]
+    Description: CloudWatch log retention for Lambda and API access logs.
+
+  DynamoDBBillingMode:
+    Type: String
+    Default: PROVISIONED
+    AllowedValues: [PROVISIONED, PAY_PER_REQUEST]
+    Description: >
+      PROVISIONED uses 5 RCU/5 WCU on the table and on each of the 3 GSIs
+      (20 RCU / 20 WCU in total), which fits inside the DynamoDB always-free
+      allowance of 25 RCU / 25 WCU. PAY_PER_REQUEST bills per request.
+
+  MaxUploadBytes:
+    Type: Number
+    Default: 2097152
+    MinValue: 102400
+    MaxValue: 5242880
+    Description: Maximum image size in bytes (default 2 MiB, hard max 5 MiB).
+
+  ApiThrottleRateLimit:
+    Type: Number
+    Default: 10
+    Description: Steady-state requests per second for the whole API (cost/abuse guard).
+
+  ApiThrottleBurstLimit:
+    Type: Number
+    Default: 20
+    Description: Burst request limit for the whole API.
+
+Conditions:
+  HasAdminEmail: !Not [!Equals [!Ref AdminNotificationEmail, ""]]
+  IsProvisioned: !Equals [!Ref DynamoDBBillingMode, PROVISIONED]
+
+# ---------------------------------------------------------------------------
+# Shared Lambda settings
+# ---------------------------------------------------------------------------
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 10
+    CodeUri: backend/
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref ComplaintsTable
+        BUCKET_NAME: !Ref AttachmentsBucket
+        TOPIC_ARN: !Ref NotificationTopic
+        ADMIN_GROUP: Admins
+        STUDENT_GROUP: Students
+        MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+        UPLOAD_URL_TTL_SECONDS: "300"
+        DOWNLOAD_URL_TTL_SECONDS: "300"
+        NOTIFICATIONS_ENABLED: "true"
+        STAGE: !Ref StageName
+
+Resources:
+  # =========================================================================
+  # Authentication - Cognito User Pool, client and groups
+  # =========================================================================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub campuscare-users-${StageName}
+      UserPoolTier: LITE
+      DeletionProtection: INACTIVE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 3
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false # students self-register; admins are created by CLI only
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT # free, limited to ~50 emails/day
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: CampusCare - verify your email
+        EmailMessage: "Your CampusCare verification code is {####}"
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub campuscare-web-${StageName}
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false # public SPA client - no secret in the browser
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      ReadAttributes: [email, email_verified, name]
+      WriteAttributes: [email, name]
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      Description: College administrators - full complaint management access
+      Precedence: 1
+      UserPoolId: !Ref UserPool
+
+  StudentsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Students
+      Description: Students - can create and view their own complaints
+      Precedence: 10
+      UserPoolId: !Ref UserPool
+
+  # Adds every newly confirmed self-registered user to the Students group.
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Cognito post-confirmation trigger - adds new users to Students
+      Handler: functions/postConfirmation/index.handler
+      Events:
+        CognitoPostConfirmation:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref UserPool
+            Trigger: PostConfirmation
+      Policies:
+        - Statement:
+            - Sid: AddUserToStudentsGroup
+              Effect: Allow
+              Action: cognito-idp:AdminAddUserToGroup
+              # Pool ARN cannot be referenced here without a circular dependency
+              # (the pool references this function), so scope to this account+region.
+              Resource: !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+
+  # =========================================================================
+  # Data - DynamoDB complaints table
+  # =========================================================================
+  ComplaintsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub campuscare-complaints-${StageName}
+      BillingMode: !Ref DynamoDBBillingMode
+      ProvisionedThroughput: !If
+        - IsProvisioned
+        - { ReadCapacityUnits: 5, WriteCapacityUnits: 5 }
+        - !Ref AWS::NoValue
+      AttributeDefinitions:
+        - { AttributeName: complaintId, AttributeType: S }
+        - { AttributeName: studentId, AttributeType: S }
+        - { AttributeName: status, AttributeType: S }
+        - { AttributeName: entityType, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: complaintId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        # Access pattern: a student's complaints, newest first
+        - IndexName: StudentIndex
+          KeySchema:
+            - { AttributeName: studentId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+          ProvisionedThroughput: !If
+            - IsProvisioned
+            - { ReadCapacityUnits: 5, WriteCapacityUnits: 5 }
+            - !Ref AWS::NoValue
+        # Access pattern: complaints with a given status, newest first
+        - IndexName: StatusIndex
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+          ProvisionedThroughput: !If
+            - IsProvisioned
+            - { ReadCapacityUnits: 5, WriteCapacityUnits: 5 }
+            - !Ref AWS::NoValue
+        # Access pattern: all complaints, newest first (sparse - stats item excluded)
+        - IndexName: CreatedAtIndex
+          KeySchema:
+            - { AttributeName: entityType, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+          ProvisionedThroughput: !If
+            - IsProvisioned
+            - { ReadCapacityUnits: 5, WriteCapacityUnits: 5 }
+            - !Ref AWS::NoValue
+
+  # =========================================================================
+  # Storage - private S3 bucket for complaint images
+  # =========================================================================
+  AttachmentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # Name is auto-generated (globally unique) - nothing account-specific hardcoded.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [POST, GET]
+            AllowedOrigins: !Ref AllowedOrigins
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  AttachmentsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AttachmentsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AttachmentsBucket.Arn
+              - !Sub "${AttachmentsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # =========================================================================
+  # Notifications - SNS topic (email only, no SMS)
+  # =========================================================================
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub campuscare-notifications-${StageName}
+      DisplayName: CampusCare
+
+  AdminEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAdminEmail
+    Properties:
+      TopicArn: !Ref NotificationTopic
+      Protocol: email
+      Endpoint: !Ref AdminNotificationEmail
+
+  # =========================================================================
+  # API - HTTP API with Cognito JWT authorizer
+  # =========================================================================
+  ApiAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /campuscare/${StageName}/api-access
+      RetentionInDays: !Ref LogRetentionDays
+
+  CampusCareApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      Description: CampusCare complaint API
+      CorsConfiguration:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowHeaders: [Authorization, Content-Type]
+        AllowMethods: [GET, POST, PATCH, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogs.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","method":"$context.httpMethod","path":"$context.path","status":"$context.status","latencyMs":"$context.responseLatency","authError":"$context.authorizer.error","integrationError":"$context.integrationErrorMessage"}'
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
+
+  # =========================================================================
+  # Lambda functions (least-privilege inline policies, no wildcard actions)
+  # =========================================================================
+  CreateComplaintFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: POST /complaints - create a complaint for the signed-in student
+      Handler: functions/createComplaint/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /complaints, Method: POST }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ComplaintsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:UpdateItem # atomic statistics counters
+              Resource: !GetAtt ComplaintsTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject # HeadObject to verify the uploaded image
+              Resource: !Sub "${AttachmentsBucket.Arn}/uploads/*"
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref NotificationTopic
+
+  GetMyComplaintsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: GET /complaints/mine - list the signed-in student's complaints
+      Handler: functions/getMyComplaints/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /complaints/mine, Method: GET }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub "${ComplaintsTable.Arn}/index/StudentIndex"
+
+  GetComplaintFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: GET /complaints/{complaintId} - owner or admin only
+      Handler: functions/getComplaint/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /complaints/{complaintId}, Method: GET }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt ComplaintsTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject # sign short-lived GET URLs for attachments
+              Resource: !Sub "${AttachmentsBucket.Arn}/uploads/*"
+
+  CreateUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: POST /uploads/presign - presigned S3 POST for one image
+      Handler: functions/createUploadUrl/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /uploads/presign, Method: POST }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "${AttachmentsBucket.Arn}/uploads/*"
+
+  AdminListComplaintsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: GET /admin/complaints - all complaints with filters (Admins only)
+      Handler: functions/adminListComplaints/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /admin/complaints, Method: GET }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource:
+                - !Sub "${ComplaintsTable.Arn}/index/StatusIndex"
+                - !Sub "${ComplaintsTable.Arn}/index/CreatedAtIndex"
+
+  AdminUpdateComplaintFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: PATCH /admin/complaints/{complaintId} - status/department/remarks (Admins only)
+      Handler: functions/adminUpdateComplaint/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /admin/complaints/{complaintId}, Method: PATCH }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt ComplaintsTable.Arn
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref NotificationTopic
+
+  AdminAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: GET /admin/analytics - complaint statistics (Admins only)
+      Handler: functions/adminAnalytics/index.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties: { ApiId: !Ref CampusCareApi, Path: /admin/analytics, Method: GET }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt ComplaintsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub "${ComplaintsTable.Arn}/index/CreatedAtIndex"
+
+  # =========================================================================
+  # Monitoring - log groups with retention + one API error alarm
+  # =========================================================================
+  PostConfirmationLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PostConfirmationFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  CreateComplaintLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreateComplaintFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  GetMyComplaintsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetMyComplaintsFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  GetComplaintLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetComplaintFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  CreateUploadUrlLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreateUploadUrlFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  AdminListComplaintsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AdminListComplaintsFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  AdminUpdateComplaintLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AdminUpdateComplaintFunction}
+      RetentionInDays: !Ref LogRetentionDays
+  AdminAnalyticsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AdminAnalyticsFunction}
+      RetentionInDays: !Ref LogRetentionDays
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub campuscare-${StageName}-api-5xx
+      AlarmDescription: CampusCare API returned server errors (check Lambda logs in CloudWatch)
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - { Name: ApiId, Value: !Ref CampusCareApi }
+        - { Name: Stage, Value: !Ref StageName }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref NotificationTopic]
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for VITE_API_BASE_URL
+    Value: !Sub https://${CampusCareApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  Region:
+    Description: Value for VITE_AWS_REGION
+    Value: !Ref AWS::Region
+  UserPoolId:
+    Description: Value for VITE_COGNITO_USER_POOL_ID
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Value for VITE_COGNITO_USER_POOL_CLIENT_ID
+    Value: !Ref UserPoolClient
+  ComplaintsTableName:
+    Value: !Ref ComplaintsTable
+  AttachmentsBucketName:
+    Value: !Ref AttachmentsBucket
+  NotificationTopicArn:
+    Value: !Ref NotificationTopic

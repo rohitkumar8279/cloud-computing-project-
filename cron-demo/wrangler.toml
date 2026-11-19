@@ -1,0 +1,8 @@
+name = "cron-demo"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Cron: har roz subah 8:00 AM IST = 02:30 UTC (cron UTC mein chalta hai)
+# Testing ke liye "* * * * *" (har minute) bhi laga sakte ho.
+[triggers]
+crons = ["30 2 * * *"]
